@@ -372,7 +372,7 @@ static void setup_64bit_code_segment(struct kvm_sregs *sregs)
 	// this common value of segment registers like CS, DS(data segment).
 	struct kvm_segment seg = {
 		.base = 0,
-		.limit = 0xffffffff,
+		.limit = 0xffffffff,	// this is limit of this segment. should not exceed this in case of stack segment data segment etc.
 		.selector = 1 << 3,
 		.present = 1,
 		.type = 11, /* Code: execute, read, accessed */	// it is for Code segment.
