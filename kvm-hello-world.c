@@ -122,8 +122,9 @@ void vm_init(struct vm *vm, size_t mem_size)
 	}
 	printf("Guest memory(RAM) allocated: %ld MB, at host virtual address from: %p,  to: %p\n", mem_size/(1024*1024), vm->mem, vm->mem+mem_size); // mmap do continuous allocation hence you can add to get last virtual address.
 
-
-	madvise(vm->mem, mem_size, MADV_MERGEABLE);
+	// kernel should be configured with CONFIG_KSM to use madvice otherwise error is thrown at this line.
+	madvise(vm->mem, mem_size, MADV_MERGEABLE);// telling kernel that pages in this range of memory are mergeable means if any page in this memory range has same content as any (same/other processes mergeable) page then merge the pages means leave only one copy of page and if any process want to modify then create the separate copy so that it will unmerged.
+	// any two pages will be merged only if both are marked as mergeable.
 
 	memreg.slot = 0;
 	memreg.flags = 0;
@@ -171,24 +172,24 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
 	uint64_t memval = 0;
+	for (;;) { // infinite loop of runnig guest. since OS runs forever
 
-	for (;;) {
-		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
+		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) { // Hypervisor transfers control to guest
 			perror("KVM_RUN");
 			exit(1);
 		}
-
-		switch (vcpu->kvm_run->exit_reason) {
+		// control got back from guest to hypervisor.
+		switch (vcpu->kvm_run->exit_reason) { // this is why we allocated memory for vcpu so that it can write exit reason and communicate with KVM.
 		case KVM_EXIT_HLT:
 			goto check;
 
 		case KVM_EXIT_IO:
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
-			    && vcpu->kvm_run->io.port == 0xE9) {
+			    && vcpu->kvm_run->io.port == 0xE9) {	// this is 8 bits port number. see in guest.c data is written to this port number.
 				char *p = (char *)vcpu->kvm_run;
-				fwrite(p + vcpu->kvm_run->io.data_offset,
-				       vcpu->kvm_run->io.size, 1, stdout);
-				fflush(stdout);
+				fwrite(p + vcpu->kvm_run->io.data_offset,	// data_offset is relative to kvm_run address. It kvm_run+data_offset is address of where data is stored.
+				       vcpu->kvm_run->io.size, 1, stdout);	//io.size = 1. so 1*1 = 1 byte will be written fwrite(*ptr, size of one block to write, number of block, file stream). kvm->io.size is the size of data written(word size).
+				fflush(stdout);	// character by character data is written and for each character KVM_EXIT_IO happens.
 				continue;
 			}
 
@@ -207,13 +208,13 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 		exit(1);
 	}
 
-	if (regs.rax != 42) {
+	if (regs.rax != 42) {	// hlt instruction in guest.c set 42 so it goes into EAX register.
 		printf("Wrong result: {E,R,}AX is %lld\n", regs.rax);
 		return 0;
 	}
 
-	memcpy(&memval, &vm->mem[0x400], sz);
-	if (memval != 42) {
+	memcpy(&memval, &vm->mem[0x400], sz);	// vm->mem[0x400] = value(vm->mem + 0x400) physical address of guest. & references. actually we have written 42 at virtual address of guest so reading it using physical address of guest memory because guest VA = PA>
+	if (memval != 42) {										// 42 value is set at 0x400 location in guest.c to verify that it reached halt statement or not.
 		printf("Wrong result: memory at 0x400 is %lld\n",
 		       (unsigned long long)memval);
 		return 0;
@@ -415,7 +416,7 @@ static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
 	pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | PDE64_PS;	// PDE64_PS means 2M paging is used not 4k paging hence only 3 level page tables 
 
 	sregs->cr3 = pml4_addr;	// CR3 register is used to store the base address of highest level page table and we need to set it. because we can allocate pml4t anywhere.
-	sregs->cr4 = CR4_PAE;	// CR4_PAE is 5th bit(1<<5) it is Physical Address Extension means it change page table layout to translate 32 bit virtual address to 36 bit physical address.
+	sregs->cr4 = CR4_PAE;	// CR4_PAE is 5th bit(1<<5). by setting it page size is treated as 2MB instead of 4KB(default). it is Physical Address Extension means it change page table layout to translate 32 bit virtual address to 36 bit physical address.
 	sregs->cr0
 		= CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
 	sregs->efer = EFER_LME | EFER_LMA;
@@ -459,6 +460,8 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 	// vm->mem is virtual address of hypervisor(host) which is beginning of guest memory we are copying the code(to be executed by guest) in this address(beginning of memory) from guest64 (guest64 is the location of compiled asembly code of guest program to be executed).
 	memcpy(vm->mem, guest64, guest64_end-guest64); 
 	// we allocated code segment at the beginning of guest memory. and set the rip (IP register) to point it.
+	printf("code segment loaded at host VA from:%p,   to %p, size: %ld Bytes\n", vm->mem, vm->mem+(guest64_end-guest64), guest64_end-guest64); // hypervisors virtual address.
+	printf("code segment loaded at guest PA from: %lld,  to %lld\n", sregs.cs.base, sregs.cs.base+(guest64_end-guest64)); // guest physical address. using cs.base here does not make sense because we are storing code at vm->mem but we have also made vm->mem as physical address 0. and set cs.base = 0. 
 	return run_vm(vm, vcpu, 8);
 }
 
