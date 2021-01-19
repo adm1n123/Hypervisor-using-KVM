@@ -73,7 +73,7 @@ struct vm {
 void vm_init(struct vm *vm, size_t mem_size)
 {
 	int api_ver;
-	struct kvm_userspace_memory_region memreg; // it is virtual memory region of host which will be used by guest as RAM.
+	struct kvm_userspace_memory_region memreg; // it is virtual memory region of host which will be used by guest as RAM(Physical memory of guest).
 
 	vm->sys_fd = open("/dev/kvm", O_RDWR); // kvm is file data will be read/written here. kvm is system for guest program.
 	if (vm->sys_fd < 0) {
@@ -96,7 +96,7 @@ void vm_init(struct vm *vm, size_t mem_size)
 	}
 
 	// comment this
-	printf("Printing KVM API version: %d, %d\n", api_ver, KVM_API_VERSION);
+	// printf("Printing KVM API version: %d, %d\n", api_ver, KVM_API_VERSION);
 
 	vm->fd = ioctl(vm->sys_fd, KVM_CREATE_VM, 0); // VM is created and fd is returned.
 	if (vm->fd < 0) {
@@ -109,7 +109,9 @@ void vm_init(struct vm *vm, size_t mem_size)
 		exit(1);
 	}
 
-	// creating the memory(RAM) for guest. mmap returns the virtual address of calling process. RAM of guest will be inside virtual memory of this process. we don't manage physical address.
+	// creating the memory(RAM) for guest. mmap returns the virtual address of calling process. RAM of guest will be inside virtual memory of this process. 
+	// This range of memory(0, 2<<20) is like physical address of guest so we need to setup instruction pointer, stack pointer to these addresses because IP,SP points to physical address and it is physical address for guest.
+	// (It is not actual PA it will convert to VA of hypervisor then PA of hypervisor which is actual address of RAM).
 	// NULL is the hint which is minimum virtual address to allocate if memory mapping already exists then kernel will allocate anywhere after this hint. since NULL is used it will allocate at any virtual address.
 	// rest of parameters are for protection of allocated memory etc.
 	vm->mem = mmap(NULL, mem_size, PROT_READ | PROT_WRITE,
@@ -118,6 +120,8 @@ void vm_init(struct vm *vm, size_t mem_size)
 		perror("mmap mem");
 		exit(1);
 	}
+	printf("Guest memory(RAM) allocated: %ld MB, at host virtual address from: %p,  to: %p\n", mem_size/(1024*1024), vm->mem, vm->mem+mem_size); // mmap do continuous allocation hence you can add to get last virtual address.
+
 
 	madvise(vm->mem, mem_size, MADV_MERGEABLE);
 
@@ -153,15 +157,14 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
                 exit(1);
 	}
 
-	// comment this
-	printf("VCPU size allocated: %d\n", KVM_GET_VCPU_MMAP_SIZE);
-
 	vcpu->kvm_run = mmap(NULL, vcpu_mmap_size, PROT_READ | PROT_WRITE,
 			     MAP_SHARED, vcpu->fd, 0);	// it map the memory in the vcpu->fd file with offset 0. means it will map from the beginning of file. This memory is used to communicate between vcpu & kvm.
 	if (vcpu->kvm_run == MAP_FAILED) {
 		perror("mmap kvm_run");
 		exit(1);
 	}
+	// comment this
+	printf("VCPU size allocated: %d KB, at virtual address of hypervisor(host): %p\n", vcpu_mmap_size/1024, vcpu->kvm_run);
 }
 
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
@@ -442,19 +445,20 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 	memset(&regs, 0, sizeof(regs));
 	/* Clear all FLAGS bits, except bit 1 which is always set. */
 	regs.rflags = 2; // 2 = 0..0010  only one bit is set. In x86 the 0x2 bit is always set. find out which is this bit what does it represent.
-	regs.rip = 0;	// rip = register IP(instruction pointer) = 0 execute the code from beginning(we will load code segment in the beginning see memcpy() below). actually this points to beginning of the memory we allocated to guest.
+	regs.rip = 0;	// rip = register IP(instruction pointer) = 0. It points to physical address of guest, execute the code from beginning(we will load code segment in the beginning see memcpy() below). actually this points to beginning of the memory we allocated to guest.
 
 	/* Create stack at top of 2 MB page and grow down. */
-	regs.rsp = 2 << 20;		// stack pointer will point to 1<<21 location and decrement from there. you can also see that it is like maximum stack memory. from 0 to 1<21. this address is for memory we allocated to guest.
+	// set the stack(kernel stack) pointer at 2<<20 address(physical address). we used 2MB RAM for guest(see in main() method) so 2<<20 = 2 * 2^20 = 2MB is actually end of guest memory so kernel stack is allocated in end and it will grow by decrementing guest virtual address range(0-2<<20).
+	regs.rsp = 2 << 20;		// stack pointer(points to physical address of guest) will point to 1<<21 location and decrement from there. this address is for memory we allocated to guest.
 
 	if (ioctl(vcpu->fd, KVM_SET_REGS, &regs) < 0) {
 		perror("KVM_SET_REGS");
 		exit(1);
 	}
 
-	// vm->mem is the address of guest memory we are copying the code(to be executed by guest) in this address(beginning of memory) from guest64 (guest64 is the location of compiled asembly code of guest program to be executed).
+	// vm->mem is virtual address of hypervisor(host) which is beginning of guest memory we are copying the code(to be executed by guest) in this address(beginning of memory) from guest64 (guest64 is the location of compiled asembly code of guest program to be executed).
 	memcpy(vm->mem, guest64, guest64_end-guest64); 
-	// we allocated code segment at the beginning of guest memory. and set the rip (IP register) to point it. and set the stack pointer at 2<<20 address.
+	// we allocated code segment at the beginning of guest memory. and set the rip (IP register) to point it.
 	return run_vm(vm, vcpu, 8);
 }
 
@@ -497,7 +501,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	vm_init(&vm, 0x200000); // 0x200000 this is the memory size (RAM) allocated for the virtual machine.(guest program) we are not running guest OS but we are running guest program because handling OS is big thing so just handle the simple guest program first.
+	vm_init(&vm, 0x200000); // 0x200000 = 2 << 20 = 2MB this is the memory size (RAM) allocated for the virtual machine.(guest program) we are not running guest OS but we are running guest program because handling OS is big thing so just handle the simple guest program first.
 	vcpu_init(&vm, &vcpu);
 
 	switch (mode) {
