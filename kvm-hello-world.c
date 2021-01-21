@@ -174,14 +174,23 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 
 
 
-#define STDOUT_PORT 0x01
-#define VAL_32_OUT_PORT 0x3201
-#define VAL_32_IN_PORT 0x3200
+
+
+
+
+
+
+
+
+#define STDOUT 0x0001
+#define UINT32_OUT_PORT 0x3201
+#define UINT32_IN_PORT 0x3200
 
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
 	uint64_t memval = 0;
+	uint32_t numExits = 0;
 	for (;;) { // infinite loop of runnig guest. since OS runs forever
 
 		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) { // Hypervisor transfers control to guest
@@ -194,6 +203,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			goto check;
 
 		case KVM_EXIT_IO:
+			numExits += 1;
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
 			    && vcpu->kvm_run->io.port == 0xE9) {	// this is 8 bits port number. see in guest.c data is written to this port number.
 				char *p = (char *)vcpu->kvm_run;
@@ -204,13 +214,16 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			}
 			
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
-				if (vcpu->kvm_run->io.port == STDOUT_PORT) {	// this is used for printing message.
+				if (vcpu->kvm_run->io.port == STDOUT) {
 					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
-					fwrite(p, vcpu->kvm_run->io.size, 1, stdout);
+					uint32_t *ptr = (uint32_t *)p;
+					p = (char *)vm->mem + *ptr;
+					printf("%s", p);
 					fflush(stdout);
+					// printf("VAL_32_PORT data offset : %lld,  io.size: %d\n", vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
 					continue;
 				}
-				if (vcpu->kvm_run->io.port == VAL_32_OUT_PORT) {
+				if (vcpu->kvm_run->io.port == UINT32_OUT_PORT) {
 					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
 					uint32_t *ptr = (uint32_t *)p;
 					printf("Got 32 bit value in hypervisor: %d\n", *ptr);
@@ -220,15 +233,15 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				}
 			}
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
-				if (vcpu->kvm_run->io.port == VAL_32_IN_PORT) {
+				if (vcpu->kvm_run->io.port == UINT32_IN_PORT) {
 					// we don't need io.size it is defined by assembly instruction in guest.c see there.
 					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
 					uint32_t *ptr = (uint32_t *)p;
-					*ptr = 11223344;
+					*ptr = numExits;
 					continue;
 				}
 			}
-
+			printf("INVALID IO OPERATION\n");
 			/* fall through */
 		default:
 			fprintf(stderr,	"Got exit_reason %d,"

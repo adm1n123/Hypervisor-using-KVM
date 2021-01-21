@@ -1,20 +1,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define STDOUT 0x0001
+#define UINT32_OUT_PORT 0x3201
+#define UINT32_IN_PORT 0x3200
 
-#define STDOUT_PORT 0x01
-#define VAL_32_OUT_PORT 0x3201
-#define VAL_32_IN_PORT 0x3200
-#define VAL_64_OUT_PORT 0x6401
-#define VAL_64_IN_PORT 0x6400
 
 static void outb(uint16_t port, uint8_t value) {
 	asm("outb %0,%1" : /* empty */ : "a" (value), "Nd" (port) : "memory");
 }
 static inline void outb_32(uint16_t port, uint32_t value) {
-  asm("out %0,%1" : /* empty */ : "a" (value), "Nd" (port) : "memory");
-}
-static inline void outb_64(uint16_t port, uint64_t value) {
   asm("out %0,%1" : /* empty */ : "a" (value), "Nd" (port) : "memory");
 }
 static inline uint32_t inb(uint16_t port) {
@@ -24,54 +19,41 @@ static inline uint32_t inb(uint16_t port) {
 }
 
 static void display(char *p) {
-	for (;*p; p += 1)
-		outb(STDOUT_PORT, *p);
+		outb(STDOUT, (uintptr_t)p); // NOTE: uintptr_t is 64 bit and our vcpu is also 64 bit but we are using 32bit IO. try to find out 64bit assembly code for this. it is working because virtual address range is very small hence even truncating 64bit to 32 bit doesn't change the address. and in hypervisor we are using this virtual address as offset.
 }
-
-static inline void display_uint(uint32_t n) {
-	char ch[20], c;
-	int i = 0;
-	if (n == 0) {
-		ch[0] = '0'; ch[1] = '\0';
-	} else {
-		while(n > 0) {
-			ch[i++] = '0' + n%10;
-			n /= 10;
-		}
-		int l = 0, r = i-1;
-		while(l<r) {
-			c = ch[l]; ch[l] = ch[r]; ch[r] = c;
-			l++; r--;
-		}
-		ch[i] = '\0';
-	}
-	for (int j = 0; ch[j]; j += 1)
-		outb(STDOUT_PORT, ch[j]);
+static void printVal(uint32_t val) {
+	outb_32(UINT32_OUT_PORT, val);
+}
+static uint32_t getNumExits() {
+	uint32_t exits = inb(UINT32_IN_PORT);
+	return exits;
 }
 
 void
 __attribute__((noreturn))
 __attribute__((section(".start")))
 _start(void) {
+	
 	display("|-----------Starting the execution ----------|\n");
 	const char *p;
 	
-
+	uint32_t val;
 
 	for (p = "Hello, world!\n"; *p; ++p)
 		outb(0xE9, *p); // for each character (pointer address) KVM Exit for IO. and one char is passed at a time. here total 14 exits required including \n after \n there is \0 (NULL) then loop terminates.
 	
+	char *ptr = "admin testing code\n";
+	display(ptr);
 
-
+	val = sizeof(char *);
 	// getting 32 bit value
 	display("Writing 32 bit value from guest\n");
-	outb_32(VAL_32_OUT_PORT, 123456789);
+	printVal(val);
+	uint32_t numExits = getNumExits();
+	display("printing exit count\n");
+	printVal(numExits);
 	display("\n");
 
-	display("Reading the 32 bit value in guest: ");
-	// uint32_t val_32 = inb(VAL_32_IN_PORT);
-	
-	display("\n");
 
 
 
