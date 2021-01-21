@@ -146,7 +146,7 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 {
 	int vcpu_mmap_size;
 
-	vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
+	vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0); // 0 here is VCPU index number, because we can create multiple VCPUs.
         if (vcpu->fd < 0) {
 		perror("KVM_CREATE_VCPU");
                 exit(1);
@@ -167,6 +167,16 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	// comment this
 	printf("VCPU size allocated: %d KB, at virtual address of hypervisor(host): %p\n", vcpu_mmap_size/1024, vcpu->kvm_run);
 }
+
+
+
+
+
+
+
+#define STDOUT_PORT 0x01
+#define VAL_32_OUT_PORT 0x3201
+#define VAL_32_IN_PORT 0x3200
 
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
@@ -191,6 +201,32 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				       vcpu->kvm_run->io.size, 1, stdout);	//io.size = 1. so 1*1 = 1 byte will be written fwrite(*ptr, size of one block to write, number of block, file stream). kvm->io.size is the size of data written(word size).
 				fflush(stdout);	// character by character data is written and for each character KVM_EXIT_IO happens.
 				continue;
+			}
+			
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
+				if (vcpu->kvm_run->io.port == STDOUT_PORT) {	// this is used for printing message.
+					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
+					fwrite(p, vcpu->kvm_run->io.size, 1, stdout);
+					fflush(stdout);
+					continue;
+				}
+				if (vcpu->kvm_run->io.port == VAL_32_OUT_PORT) {
+					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
+					uint32_t *ptr = (uint32_t *)p;
+					printf("Got 32 bit value in hypervisor: %d\n", *ptr);
+					fflush(stdout);
+					// printf("VAL_32_PORT data offset : %lld,  io.size: %d\n", vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
+					continue;
+				}
+			}
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
+				if (vcpu->kvm_run->io.port == VAL_32_IN_PORT) {
+					// we don't need io.size it is defined by assembly instruction in guest.c see there.
+					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
+					uint32_t *ptr = (uint32_t *)p;
+					*ptr = 11223344;
+					continue;
+				}
 			}
 
 			/* fall through */

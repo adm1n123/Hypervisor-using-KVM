@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -Werror -O2
+CFLAGS = -Wall -Wextra -Werror -O2	# -Werror make warning treated as error.
 
 .PHONY: run
 run: kvm-hello-world
