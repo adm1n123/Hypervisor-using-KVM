@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include "filesystem.h"
 
 #define STDOUT 0x0001
 #define UINT32_OUT_PORT 0x3201
@@ -19,7 +20,7 @@ static inline uint32_t inb(uint16_t port) {
 }
 
 static void display(char *p) {
-		outb(STDOUT, (uintptr_t)p); // NOTE: uintptr_t is 64 bit and our vcpu is also 64 bit but we are using 32bit IO. try to find out 64bit assembly code for this. it is working because virtual address range is very small hence even truncating 64bit to 32 bit doesn't change the address. and in hypervisor we are using this virtual address as offset.
+		outb_32(STDOUT, (uintptr_t)p); // NOTE: uintptr_t is 64 bit and our vcpu is also 64 bit but we are using 32bit IO. try to find out 64bit assembly code for this. it is working because virtual address range is very small hence even truncating 64bit to 32 bit doesn't change the address. and in hypervisor we are using this virtual address as offset.
 }
 static void printVal(uint32_t val) {
 	outb_32(UINT32_OUT_PORT, val);
