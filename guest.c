@@ -69,6 +69,24 @@ int read(int fd, char *buf, size_t size) {
 	return rd.ssize;
 }
 
+int write(int fd, char *buf, size_t count) {
+	wr.fd = fd;
+	wr.buf = buf;
+	wr.count = count;
+
+	fh.op = FS_WRITE;
+	fh.op_struct = &wr;
+	out(FS_PORT, (uintptr_t)&fh);
+	return wr.ssize;
+}
+
+int close(int fd) {
+	fh.op = FS_CLOSE;
+	fh.fd = fd;
+	out(FS_PORT, (uintptr_t)&fh);
+	return fh.flag;
+}
+
 int create();
 int close();
 int read();
@@ -114,7 +132,8 @@ void part_B() {
 
 void part_C() {
 	display("|-----------Inside Part C ----------|\n");
-	int fd = open("test-files/myfile.txt", O_RDONLY);
+
+	int fd = open("test-files/myfile.txt", O_RDWR|O_APPEND);
 	if(fd < 0) {
 		display("Error opening file\n");
 		return;
@@ -126,12 +145,32 @@ void part_C() {
 	size_t size = 100;
 	int ssize = read(fd, buf, size);
 	if(ssize < 0) {
-		display("Error reading file\n");
+		display("Error reading the file\n");
+		return;
+	}
+	display("printing the read data: ");
+	display(buf);
+	display("\n");
+	if(close(fd) != 0) {
+		display("Error while closing file\n");
+	}
+
+	fd = open("test-files/w_myfile.txt", O_WRONLY|O_APPEND);
+	if(fd < 0) {
+		display("Error opening file\n");
+		return;
+	}
+	buf = "Hi I am deepak i am working on virtualization assignment";
+	size_t count = 500;
+	ssize = write(fd, buf, count);
+	if(ssize < 0) {
+		display("Error writing on file\n");
 		return;
 	}
 
-	display("printing the read data: ");
-	display(buf);
+	if(close(fd) != 0) {
+		display("Error while closing file\n");
+	}
 
 	display("\n|-----------Leaving Part C ----------|\n");
 }

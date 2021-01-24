@@ -10,11 +10,15 @@
 #define FS_OPEN 0
 #define FS_READ 1
 #define FS_WRITE 2
+#define FS_SEEK 3
+#define FS_CLOSE 4
 
 char data[MAX_DATA];
 
 struct file_handler {
 	int op;
+	int fd;
+	int flag;
 	void *op_struct;
 } fh;
 
@@ -33,3 +37,11 @@ struct read_file {
 	char *buf;
 	int ssize;
 } rd;
+
+struct write_file {
+	int fd;
+	char *buf;
+	size_t count;
+	// return
+	int ssize;
+} wr;

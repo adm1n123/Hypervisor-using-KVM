@@ -319,7 +319,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 						}
 						char *buf = (char *)vm->mem + (uintptr_t)rd_ptr->buf;
 						if(validate_guest_addr(vm->mem, buf, rd_ptr->size) == FALSE) { // entire buffer should be in guest memory no overflow.
-							printf("Invalid Buffer Memory Location\n");
+							printf("Invalid Read Buffer Memory Location\n");
 							rd_ptr->ssize = -1;
 							continue;
 						}
@@ -327,6 +327,44 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 						rd_ptr->ssize = read(eptr->fd, buf, rd_ptr->size);
 						continue;
 					}
+					if(fh_ptr->op == FS_WRITE) {
+						struct write_file *wr_ptr = (struct write_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);
+						if(validate_guest_addr(vm->mem, wr_ptr, sizeof(struct write_file)) == FALSE) {
+							printf("Invalid Write Struct Memory Location\n");
+							continue;
+						}
+						struct open_file_entry *eptr = get_entry(wr_ptr->fd);
+						if(eptr == NULL) {
+							printf("File is not open\n");
+							wr_ptr->ssize = -1;
+							continue;
+						}
+						char *buf = (char *)vm->mem + (uintptr_t)wr_ptr->buf;
+						if(validate_guest_addr(vm->mem, buf, wr_ptr->count) == FALSE) { // entire buffer should be in guest memory no overflow.
+							printf("Invalid Write Buffer Memory Location\n");
+							wr_ptr->ssize = -1;
+							continue;
+						}
+						// printf("count:%ld, buf is:%s\n", wr_ptr->count, buf);
+						// char buff[MAX_DATA];
+						// strcpy(buff, buf);
+						// printf("%s\n", buff);
+						if(strlen(buf) < wr_ptr->count) wr_ptr->count = strlen(buf);
+						wr_ptr->ssize = write(eptr->fd, buf, wr_ptr->count); // if binary data is written in sublime try opening in default text editor.
+						continue;
+					}
+					if(fh_ptr->op == FS_CLOSE) {
+						struct open_file_entry *eptr = get_entry(fh_ptr->fd);
+						if(eptr == NULL) {
+							printf("File is not open\n");
+							fh_ptr->flag = -1;
+							continue;
+						}
+						fh_ptr->flag = close(eptr->fd);
+						if(fh_ptr->flag == 0) eptr->fd = -1;
+						continue;
+					}
+
 
 					printf("INVALID FILE OPERATION\n");
 				}
