@@ -1,0 +1,34 @@
+#define MAX_PATHNAME 1000
+#define MAX_DATA 1000
+#define STDOUT 0x0001
+#define OUT_PORT 0x3201
+#define IN_PORT 0x3200
+#define FS_PORT 0xFF00
+
+#define TRUE 1
+#define FALSE 0
+#define FS_OPEN 0
+#define FS_READ 1
+#define FS_WRITE 2
+
+char data[MAX_DATA];
+
+struct file_handler {
+	int op;
+	void *op_struct;
+} fh;
+
+struct open_file {
+	// arguments
+	int flags;
+	char *pathname;
+	// return
+	int fd;
+} opn;
+
+struct read_file {
+	int fd;
+	char *buf;
+	size_t size;
+	int ssize;
+} rd;

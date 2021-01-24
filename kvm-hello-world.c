@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <linux/kvm.h>
+#include "kvm-guest-common.h"
 
 /* CR0 bits */
 #define CR0_PE 1u
@@ -168,29 +169,63 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	printf("VCPU size allocated: %d KB, at virtual address of hypervisor(host): %p\n", vcpu_mmap_size/1024, vcpu->kvm_run);
 }
 
+/////////////////////////////////////////////  My CODE ////////////////////////////////////////////////////////////////////////////////////////
+
+int file_table_len;
+size_t vm_size = 0x200000;
+
+struct open_file_entry {
+	int guest_fd;
+	int fd;
+	char pathname[MAX_PATHNAME];
+	struct open_file_entry *next;
+} *file;
+
+struct open_file_entry* new_file_entry() {
+	struct open_file_entry *ptr = malloc(sizeof(struct open_file_entry));
+	ptr->guest_fd = file_table_len;
+	ptr->fd = -1;
+	ptr->next = NULL;
+	file_table_len += 1;
+	return ptr;
+}
+
+struct open_file_entry* make_entry() { // return the lowest unused fd.
+	struct open_file_entry *ptr = file;
+	if(ptr->fd == -1) return ptr;
+	while(ptr->next != NULL) {
+		if(ptr->next->fd == -1) return ptr->next;
+		ptr = ptr->next;
+	}
+	ptr->next = new_file_entry();
+	return ptr->next;
+}
+int is_valid_fd(int guest_fd) { // validate the fd from open file table.
+	struct open_file_entry *ptr = file;
+	do {
+		if(ptr->guest_fd == guest_fd) return TRUE;
+	} while(ptr->next != NULL);
+	return FALSE;
+}
+void fs_init() {
+	file_table_len = 0;
+	file = new_file_entry();
+}
+
+int validate_guest_addr(void *vm_mem, void *ptr, int offset) {
+	char *p = (char *)ptr;
+	if(p < (char *)vm_mem || p + offset > (char *)vm_mem + vm_size) {
+		return FALSE;
+	}
+	return TRUE;
+}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-#define STDOUT 0x0001
-#define UINT32_OUT_PORT 0x3201
-#define UINT32_IN_PORT 0x3200
-
-int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
-{
+int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 	struct kvm_regs regs;
 	uint64_t memval = 0;
 	uint32_t numExits = 0;
+	fs_init(); // initializing my file system.
 	for (;;) { // infinite loop of runnig guest. since OS runs forever
 
 		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) { // Hypervisor transfers control to guest
@@ -223,17 +258,51 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 					// printf("VAL_32_PORT data offset : %lld,  io.size: %d\n", vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
 					continue;
 				}
-				if (vcpu->kvm_run->io.port == UINT32_OUT_PORT) {
+				if (vcpu->kvm_run->io.port == OUT_PORT) {
 					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
 					uint32_t *ptr = (uint32_t *)p;
-					printf("Got 32 bit value in hypervisor: %d\n", *ptr);
+					printf("Got 32 bit value in hypervisor: %u\n", *ptr);
 					fflush(stdout);
 					// printf("VAL_32_PORT data offset : %lld,  io.size: %d\n", vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
 					continue;
 				}
+				if (vcpu->kvm_run->io.port == FS_PORT) {
+					printf("hi inside 1\n");
+					uint32_t *ptr =(uint32_t *)((char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+					uint32_t guest_mem_addr = *ptr; // guest_mem_addr is offset of struct from guest memory.
+
+					struct file_handler *fh_ptr = (struct file_handler *) ((char *)vm->mem + guest_mem_addr);
+					if(validate_guest_addr(vm->mem, fh_ptr, sizeof(struct file_handler)) == FALSE) {// should not be more than allocated memory for guest.
+						printf("Invalid Memory Location\n");
+						continue;
+					}
+					printf("hi inside 2\n");
+					if(fh_ptr->op == FS_OPEN) {
+						printf("hi inside 3\n");
+						struct open_file *opn_ptr = (struct open_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);// fh_ptr->op_struct is logical address of guest means offset from vm->mem.
+						if(validate_guest_addr(vm->mem, opn_ptr, sizeof(struct open_file)) == FALSE) {
+							printf("Invalid Memory Location\n");
+							continue;
+						}
+						char *pathname = (char *)vm->mem + (uintptr_t)opn_ptr->pathname;
+						if(validate_guest_addr(vm->mem, pathname, strlen(pathname)) == FALSE) {
+							printf("Invalid Memory Location\n");
+							continue;
+						}
+						int fd = open(pathname, opn_ptr->flags);
+						printf("host fd:%d\n", fd);
+						struct open_file_entry *eptr = make_entry();
+						eptr->fd = fd;
+						strcpy(eptr->pathname, pathname);
+						opn_ptr->fd = eptr->guest_fd;
+						continue;
+					}
+
+					printf("INVALID FILE OPERATION\n");
+				}
 			}
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
-				if (vcpu->kvm_run->io.port == UINT32_IN_PORT) {
+				if (vcpu->kvm_run->io.port == IN_PORT) {
 					// we don't need io.size it is defined by assembly instruction in guest.c see there.
 					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
 					uint32_t *ptr = (uint32_t *)p;
