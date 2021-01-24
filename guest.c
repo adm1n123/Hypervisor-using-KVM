@@ -53,6 +53,12 @@ int open(char *pathname, int flags) {
 }
 
 int read(int fd, char *buf, size_t size) {
+	if(size + 1 > MAX_DATA) { // because last char null will be extra and also required.
+		display("Max Reading Limit is:");
+		printVal(MAX_DATA);
+		display(" Bytes\n");
+		return -1;
+	}
 	rd.fd = fd;
 	rd.buf = buf;
 	rd.size = size;
@@ -96,10 +102,10 @@ void part_B() {
 
 	val = 1<<31;
 	// getting 32 bit value
-	display("Writing 32 bit value from guest\n");
+	display("Writing 32 bit value from guest:");
 	printVal(val);
 	uint32_t numExits = getNumExits();
-	display("printing exit count\n");
+	display("printing exit count:");
 	printVal(numExits);
 	display("\n");
 
@@ -115,19 +121,19 @@ void part_C() {
 	}
 	display("open file guest fd:");
 	printVal(fd);
-	display("\n");
+
 	char *buf = data;
-	size_t size = 20;
+	size_t size = 100;
 	int ssize = read(fd, buf, size);
 	if(ssize < 0) {
 		display("Error reading file\n");
 		return;
 	}
-	buf[size] = '\0';
+
 	display("printing the read data: ");
 	display(buf);
 
-	display("|-----------Leaving Part C ----------|\n");
+	display("\n|-----------Leaving Part C ----------|\n");
 }
 
 

@@ -1,5 +1,5 @@
-#define MAX_PATHNAME 1000
-#define MAX_DATA 1000
+#define MAX_PATHNAME 100
+#define MAX_DATA 10000 // 10 KB
 #define STDOUT 0x0001
 #define OUT_PORT 0x3201
 #define IN_PORT 0x3200
@@ -28,7 +28,8 @@ struct open_file {
 
 struct read_file {
 	int fd;
-	char *buf;
 	size_t size;
+	// return;
+	char *buf;
 	int ssize;
 } rd;

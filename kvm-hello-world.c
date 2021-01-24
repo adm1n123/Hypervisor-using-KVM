@@ -200,6 +200,7 @@ struct open_file_entry* make_entry() { // return the lowest unused fd.
 	ptr->next = new_file_entry();
 	return ptr->next;
 }
+
 int is_valid_fd(int guest_fd) { // validate the fd from open file table.
 	struct open_file_entry *ptr = file;
 	do {
@@ -207,6 +208,15 @@ int is_valid_fd(int guest_fd) { // validate the fd from open file table.
 	} while(ptr->next != NULL);
 	return FALSE;
 }
+
+struct open_file_entry* get_entry(int guest_fd) {
+	struct open_file_entry *ptr = file;
+	do {
+		if(ptr->guest_fd == guest_fd) return ptr;
+	} while(ptr->next != NULL);
+	return NULL;
+}
+
 void fs_init() {
 	file_table_len = 0;
 	file = new_file_entry();
@@ -261,40 +271,60 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 				if (vcpu->kvm_run->io.port == OUT_PORT) {
 					char *p = (char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset;
 					uint32_t *ptr = (uint32_t *)p;
-					printf("Got 32 bit value in hypervisor: %u\n", *ptr);
+					printf("%u\n", *ptr);
 					fflush(stdout);
 					// printf("VAL_32_PORT data offset : %lld,  io.size: %d\n", vcpu->kvm_run->io.data_offset, vcpu->kvm_run->io.size);
 					continue;
 				}
 				if (vcpu->kvm_run->io.port == FS_PORT) {
-					printf("hi inside 1\n");
 					uint32_t *ptr =(uint32_t *)((char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
 					uint32_t guest_mem_addr = *ptr; // guest_mem_addr is offset of struct from guest memory.
 
 					struct file_handler *fh_ptr = (struct file_handler *) ((char *)vm->mem + guest_mem_addr);
 					if(validate_guest_addr(vm->mem, fh_ptr, sizeof(struct file_handler)) == FALSE) {// should not be more than allocated memory for guest.
-						printf("Invalid Memory Location\n");
+						printf("Invalid File Handler Memory Location\n");
 						continue;
 					}
-					printf("hi inside 2\n");
+
 					if(fh_ptr->op == FS_OPEN) {
-						printf("hi inside 3\n");
 						struct open_file *opn_ptr = (struct open_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);// fh_ptr->op_struct is logical address of guest means offset from vm->mem.
 						if(validate_guest_addr(vm->mem, opn_ptr, sizeof(struct open_file)) == FALSE) {
-							printf("Invalid Memory Location\n");
+							printf("Invalid Open Struct Memory Location\n");
 							continue;
 						}
 						char *pathname = (char *)vm->mem + (uintptr_t)opn_ptr->pathname;
 						if(validate_guest_addr(vm->mem, pathname, strlen(pathname)) == FALSE) {
-							printf("Invalid Memory Location\n");
+							printf("Invalid Pathname Memory Location\n");
+							opn_ptr->fd = -1;
 							continue;
 						}
 						int fd = open(pathname, opn_ptr->flags);
-						printf("host fd:%d\n", fd);
 						struct open_file_entry *eptr = make_entry();
 						eptr->fd = fd;
 						strcpy(eptr->pathname, pathname);
 						opn_ptr->fd = eptr->guest_fd;
+						continue;
+					}
+					if(fh_ptr->op == FS_READ) {
+						struct read_file *rd_ptr = (struct read_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);
+						if(validate_guest_addr(vm->mem, rd_ptr, sizeof(struct read_file)) == FALSE) {
+							printf("Invalid Read Struct Memory Location\n");
+							continue;
+						}
+						struct open_file_entry *eptr = get_entry(rd_ptr->fd);
+						if(eptr == NULL) {
+							printf("File is not open\n");
+							rd_ptr->ssize = -1;
+							continue;
+						}
+						char *buf = (char *)vm->mem + (uintptr_t)rd_ptr->buf;
+						if(validate_guest_addr(vm->mem, buf, rd_ptr->size) == FALSE) { // entire buffer should be in guest memory no overflow.
+							printf("Invalid Buffer Memory Location\n");
+							rd_ptr->ssize = -1;
+							continue;
+						}
+
+						rd_ptr->ssize = read(eptr->fd, buf, rd_ptr->size);
 						continue;
 					}
 
