@@ -59,4 +59,33 @@
 # define __O_TMPFILE   (020000000 | __O_DIRECTORY)
 #endif
 
+// ******* for lseek **********************************************************
+/* whence values for lseek(2) */
+#define	SEEK_SET	0	/* set file offset to offset */
+#define	SEEK_CUR	1	/* set file offset to current plus offset */
+#define	SEEK_END	2	/* set file offset to EOF plus offset */
 
+#ifndef _POSIX_SOURCE
+/* whence values for lseek(2); renamed by POSIX 1003.1 */
+#define	L_SET		SEEK_SET
+#define	L_INCR		SEEK_CUR
+#define	L_XTND		SEEK_END
+#endif
+#ifdef __USE_GNU
+# define SEEK_DATA      3       /* Seek to next data.  */
+# define SEEK_HOLE      4       /* Seek to next hole.  */
+#endif
+
+
+//*********** for mode **********************************************************
+#define	S_IRWXU	0000700			/* RWX mask for owner */
+#define	S_IRUSR	0000400			/* R for owner */
+#define	S_IWUSR	0000200			/* W for owner */
+#define	S_IXUSR	0000100			/* X for owner */
+
+// ********* for access ********************************************************
+/* access function */
+#define	F_OK		0	/* test for existence of file */
+#define	X_OK		0x01	/* test for execute or search permission */
+#define	W_OK		0x02	/* test for write permission */
+#define	R_OK		0x04	/* test for read permission */

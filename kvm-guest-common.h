@@ -10,8 +10,9 @@
 #define FS_OPEN 0
 #define FS_READ 1
 #define FS_WRITE 2
-#define FS_SEEK 3
+#define FS_LSEEK 3
 #define FS_CLOSE 4
+#define FS_ISOPEN 5
 
 char data[MAX_DATA];
 
@@ -26,6 +27,7 @@ struct open_file {
 	// arguments
 	int flags;
 	char *pathname;
+	int mode;
 	// return
 	int fd;
 } opn;
@@ -45,3 +47,11 @@ struct write_file {
 	// return
 	int ssize;
 } wr;
+
+struct lseek_file {
+	int fd;
+	int offset;
+	int whence;
+	// return
+	int foffset;
+} lsk;

@@ -204,16 +204,16 @@ struct open_file_entry* make_entry() { // return the lowest unused fd.
 int is_valid_fd(int guest_fd) { // validate the fd from open file table.
 	struct open_file_entry *ptr = file;
 	do {
-		if(ptr->guest_fd == guest_fd) return TRUE;
-	} while(ptr->next != NULL);
+		if(ptr->guest_fd == guest_fd && ptr->fd != -1) return TRUE;
+	} while(ptr->next != NULL && guest_fd < ptr->guest_fd);
 	return FALSE;
 }
 
 struct open_file_entry* get_entry(int guest_fd) {
 	struct open_file_entry *ptr = file;
 	do {
-		if(ptr->guest_fd == guest_fd) return ptr;
-	} while(ptr->next != NULL);
+		if(ptr->guest_fd == guest_fd && ptr->fd != -1) return ptr;
+	} while(ptr->next != NULL && guest_fd < ptr->guest_fd);
 	return NULL;
 }
 
@@ -298,7 +298,11 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 							opn_ptr->fd = -1;
 							continue;
 						}
-						int fd = open(pathname, opn_ptr->flags);
+						int fd;
+						if(opn_ptr->mode == -1) 
+							fd = open(pathname, opn_ptr->flags);
+						else fd = open(pathname, opn_ptr->flags, opn_ptr->mode);
+
 						struct open_file_entry *eptr = make_entry();
 						eptr->fd = fd;
 						strcpy(eptr->pathname, pathname);
@@ -351,6 +355,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 						// printf("%s\n", buff);
 						if(strlen(buf) < wr_ptr->count) wr_ptr->count = strlen(buf);
 						wr_ptr->ssize = write(eptr->fd, buf, wr_ptr->count); // if binary data is written in sublime try opening in default text editor.
+						printf("write ssize:%d\n", wr_ptr->ssize);
 						continue;
 					}
 					if(fh_ptr->op == FS_CLOSE) {
@@ -364,7 +369,27 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 						if(fh_ptr->flag == 0) eptr->fd = -1;
 						continue;
 					}
-
+					if(fh_ptr->op == FS_LSEEK) {
+						struct lseek_file *lsk_ptr = (struct lseek_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);
+						if(validate_guest_addr(vm->mem, lsk_ptr, sizeof(struct lseek_file)) == FALSE) {
+							printf("Invalid Lseek Struct Memory Location\n");
+							continue;
+						}
+						struct open_file_entry *eptr = get_entry(lsk_ptr->fd);
+						if(eptr == NULL) {
+							printf("File is not open\n");
+							lsk_ptr->foffset = -1;
+							continue;
+						}
+						lsk_ptr->foffset = lseek(eptr->fd, lsk_ptr->offset, lsk_ptr->whence);
+						printf("lseek foffset:%d\n", lsk_ptr->foffset);
+						continue;
+					}
+					if(fh_ptr->op == FS_ISOPEN) {
+						if(is_valid_fd(fh_ptr->fd) == TRUE) fh_ptr->flag = 1;
+						else fh_ptr->flag = 0;
+						continue;
+					}
 
 					printf("INVALID FILE OPERATION\n");
 				}

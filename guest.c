@@ -27,15 +27,25 @@ uint32_t getNumExits() {
 	return exits;
 }
 
-////////////////////////////////////////////////////////////////////// File System ////////////////////////
-
-
 int valid_size(char *p) {
 	for(int i = 0; i < MAX_PATHNAME; i++) {
 		if(p[i] == '\0') return TRUE;
 	}
 	return FALSE;
 }
+
+////////////////////////////////////////////////////////////////////// File System ////////////////////////
+int open(char *pathname, int flags);
+int open2(char *pathname, int flags, int mode);
+int creat(char *pathname, int mode);
+int read(int fd, char *buf, size_t size);
+int write(int fd, char *buf, size_t count);
+int close(int fd);
+int lseek(int fd, int offset, int whence);
+int get_cursor(int fd);
+int is_open(int fd);
+
+
 
 int open(char *pathname, int flags) {
 	if(valid_size(pathname) == FALSE) {
@@ -45,11 +55,32 @@ int open(char *pathname, int flags) {
 
 	opn.flags = flags;
 	opn.pathname = pathname;
+	opn.mode = -1;
 
 	fh.op = FS_OPEN;
 	fh.op_struct = &opn;
 	out(FS_PORT, (uintptr_t)&fh);
 	return opn.fd;
+}
+
+int open2(char *pathname, int flags, int mode) {
+	if(valid_size(pathname) == FALSE) {
+		display("Invalid pathname max limit 1000\n");
+		return -1;
+	}
+	
+	opn.pathname = pathname;
+	opn.flags = flags;
+	opn.mode = mode;
+
+	fh.op = FS_OPEN;
+	fh.op_struct = &opn;
+	out(FS_PORT, (uintptr_t)&fh);
+	return opn.fd;
+}
+
+int creat(char *pathname, int mode) {
+	return open2(pathname, O_CREAT|O_WRONLY|O_TRUNC, mode);
 }
 
 int read(int fd, char *buf, size_t size) {
@@ -87,20 +118,37 @@ int close(int fd) {
 	return fh.flag;
 }
 
-int create();
-int close();
-int read();
-int write();
-int lseek();
+int lseek(int fd, int offset, int whence) {
+	lsk.fd = fd;
+	lsk.offset = offset;
+	lsk.whence = whence;
+
+	fh.op = FS_LSEEK;
+	fh.op_struct = &lsk;
+	out(FS_PORT, (uintptr_t)&fh);
+	return lsk.foffset;
+}
+
+int get_cursor(int fd) {
+	return lseek(fd, 0, SEEK_CUR);
+}
+
+int is_open(int fd) {
+	fh.op = FS_ISOPEN;
+	fh.fd = fd;
+
+	out(FS_PORT, (uintptr_t)&fh);
+	return fh.flag;
+}
+
+void list_open_files();
 int rename();
 int copy();
 int remove();
 int dup();
 int dup2();
-int isopen();
-int get_seek_pointer_offset(); // change this name;
 int access(); // https://stackoverflow.com/questions/230062/whats-the-best-way-to-check-if-a-file-exists-in-c
-
+void errorno(); // use errorno for printing the file error use extern errorno variable and print the error. in host. -1 is not sufficient to catch error.
 ////////////////////////////////////////////////////////////////////// File System ////////////////////////
 
 void part_A() {
@@ -130,9 +178,7 @@ void part_B() {
 	display("|-----------Leaving Part B ----------|\n");
 }
 
-void part_C() {
-	display("|-----------Inside Part C ----------|\n");
-
+void test_read() {
 	int fd = open("test-files/myfile.txt", O_RDWR|O_APPEND);
 	if(fd < 0) {
 		display("Error opening file\n");
@@ -154,23 +200,42 @@ void part_C() {
 	if(close(fd) != 0) {
 		display("Error while closing file\n");
 	}
+}
 
-	fd = open("test-files/w_myfile.txt", O_WRONLY|O_APPEND);
+void test_write() {
+	int fd = open("test-files/w_myfile.txt", O_RDWR);
 	if(fd < 0) {
 		display("Error opening file\n");
 		return;
 	}
-	buf = "Hi I am deepak i am working on virtualization assignment";
-	size_t count = 500;
-	ssize = write(fd, buf, count);
+	char *buf = "Hi I am deepak i am working on virtualization assignment";
+	size_t count = 20;
+	int ssize = write(fd, buf, count);
 	if(ssize < 0) {
 		display("Error writing on file\n");
 		return;
 	}
 
+	buf = "SEEK DATA SEEK DATA SEEK DATA SEEK";
+	int foffset = lseek(fd, 2, SEEK_SET);
+	if(foffset < 0) {
+		display("Error while seeking\n");
+	}
+	ssize = write(fd, buf, 30);
+	display("printing the read data\n");
+	display(buf);
+	
 	if(close(fd) != 0) {
 		display("Error while closing file\n");
 	}
+
+}
+
+void part_C() {
+	display("|-----------Inside Part C ----------|\n");
+
+	// test_read();
+	test_write();
 
 	display("\n|-----------Leaving Part C ----------|\n");
 }
