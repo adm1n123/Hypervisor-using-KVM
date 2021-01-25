@@ -1,6 +1,5 @@
 #include <stddef.h>
 #include <stdint.h>
-#include "filesystem.h"
 #include "kvm-guest-common.h"
 
 
@@ -49,7 +48,7 @@ int is_open(int fd);
 
 int open(char *pathname, int flags) {
 	if(valid_size(pathname) == FALSE) {
-		display("Invalid pathname max limit 1000\n");
+		display("Guest: Invalid pathname max limit 1000\n");
 		return -1;
 	}
 
@@ -65,7 +64,7 @@ int open(char *pathname, int flags) {
 
 int open2(char *pathname, int flags, int mode) {
 	if(valid_size(pathname) == FALSE) {
-		display("Invalid pathname max limit 1000\n");
+		display("Guest: Invalid pathname max limit 1000\n");
 		return -1;
 	}
 	
@@ -80,12 +79,12 @@ int open2(char *pathname, int flags, int mode) {
 }
 
 int creat(char *pathname, int mode) {
-	return open2(pathname, O_CREAT|O_WRONLY|O_TRUNC, mode);
+	return open2(pathname, OPN_CREAT|OPN_WRONLY|OPN_TRUNC, mode);
 }
 
 int read(int fd, char *buf, size_t size) {
 	if(size + 1 > MAX_DATA) { // because last char null will be extra and also required.
-		display("Max Reading Limit is:");
+		display("Guest: Max Reading Limit is:");
 		printVal(MAX_DATA);
 		display(" Bytes\n");
 		return -1;
@@ -130,7 +129,7 @@ int lseek(int fd, int offset, int whence) {
 }
 
 int get_cursor(int fd) {
-	return lseek(fd, 0, SEEK_CUR);
+	return lseek(fd, 0, LSEEK_CUR);
 }
 
 int is_open(int fd) {
@@ -168,10 +167,10 @@ void part_B() {
 
 	val = 1<<31;
 	// getting 32 bit value
-	display("Writing 32 bit value from guest:");
+	display("GUEST: Writing 32 bit value:");
 	printVal(val);
 	uint32_t numExits = getNumExits();
-	display("printing exit count:");
+	display("GUEST: printing exit count:");
 	printVal(numExits);
 	display("\n");
 
@@ -179,62 +178,79 @@ void part_B() {
 }
 
 void test_read() {
-	int fd = open("test-files/myfile.txt", O_RDWR|O_APPEND);
+	int fd = open("test-files/myfile.txt", OPN_RDWR|OPN_APPEND);
 	if(fd < 0) {
-		display("Error opening file\n");
+		display("GUEST: Error opening file\n");
 		return;
 	}
-	display("open file guest fd:");
+	display("GUEST: open file fd:");
 	printVal(fd);
 
 	char *buf = data;
 	size_t size = 100;
 	int ssize = read(fd, buf, size);
 	if(ssize < 0) {
-		display("Error reading the file\n");
+		display("GUEST: Error reading the file\n");
 		return;
 	}
-	display("printing the read data: ");
+	display("GUEST: printing the read data: ");
 	display(buf);
 	display("\n");
+
+	int foffset = lseek(fd, 2, LSEEK_SET);
+	if(foffset < 0) {
+		display("GUEST: Error while seeking\n");
+	}
+
+	ssize = read(fd, buf, size);
+	if(ssize < 0) {
+		display("GUEST: Error reading the file\n");
+		return;
+	}
+	display("GUEST: printing the read data: ");
+	display(buf);
+	display("\n");
+
 	if(close(fd) != 0) {
-		display("Error while closing file\n");
+		display("GUEST: Error while closing file\n");
 	}
 }
 
 void test_write() {
-	int fd = open("test-files/w_myfile.txt", O_RDWR);
+	int fd = open("test-files/w_myfile.txt", OPN_RDWR);
 	if(fd < 0) {
-		display("Error opening file\n");
+		display("GUEST: Error opening file\n");
 		return;
 	}
 	char *buf = "Hi I am deepak i am working on virtualization assignment";
-	size_t count = 20;
-	int ssize = write(fd, buf, count);
+	int ssize = write(fd, buf, 40);
 	if(ssize < 0) {
-		display("Error writing on file\n");
+		display("GUEST: Error writing on file\n");
 		return;
 	}
 
-	buf = "SEEK DATA SEEK DATA SEEK DATA SEEK";
-	int foffset = lseek(fd, 2, SEEK_SET);
+	int foffset = lseek(fd, 2, LSEEK_SET); // if file is open in append mode then seek will not work.
 	if(foffset < 0) {
-		display("Error while seeking\n");
+		display("GUEST: Error while seeking\n");
 	}
+
+	buf = "SEEK DATA SEEK DATA SEEK DATA SEEK";
 	ssize = write(fd, buf, 30);
-	display("printing the read data\n");
-	display(buf);
-	
+	if(ssize < 0) {
+		display("GUEST: Error writing on file\n");
+		return;
+	}
+
 	if(close(fd) != 0) {
-		display("Error while closing file\n");
+		display("GUEST: Error while closing file\n");
 	}
 
 }
 
 void part_C() {
 	display("|-----------Inside Part C ----------|\n");
-
-	// test_read();
+	
+	test_read();
 	test_write();
 
 	display("\n|-----------Leaving Part C ----------|\n");

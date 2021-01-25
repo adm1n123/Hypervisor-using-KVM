@@ -170,7 +170,7 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 }
 
 /////////////////////////////////////////////  My CODE ////////////////////////////////////////////////////////////////////////////////////////
-
+extern int errno;
 int file_table_len;
 size_t vm_size = 0x200000;
 
@@ -230,6 +230,47 @@ int validate_guest_addr(void *vm_mem, void *ptr, int offset) {
 	return TRUE;
 }
 
+void print_entry(struct open_file_entry *eptr) {
+	printf("Guest FD:%d,	Host FD:%d,	Pathname:%s\n", eptr->guest_fd, eptr->fd, eptr->pathname);
+}
+
+void print_file_table() {
+	printf("\n******************** Open File Table ***********************\n");
+	struct open_file_entry *ptr = file;
+	while(ptr != NULL) {
+		if(ptr->fd != -1) print_entry(ptr);
+		ptr = ptr->next;
+	}
+	printf("************************************************************\n");
+}
+
+int get_open_flags(int gflags) {
+	int flags = 0;
+	if(gflags & OPN_RDONLY) flags |= O_RDONLY;
+	if(gflags & OPN_WRONLY) flags |= O_WRONLY;
+	if(gflags & OPN_RDWR) 	flags |= O_RDWR;
+	if(flags == 0) return -1;
+
+	if(gflags & OPN_CREAT) 	flags |= O_CREAT;
+	if(gflags & OPN_TRUNC) 	flags |= O_TRUNC;
+	if(gflags & OPN_APPEND) flags |= O_APPEND;
+	return flags;
+}
+
+int get_open_mode(int gmode) {
+	if(gmode & M_IRWXU)	return S_IRWXU;
+	if(gmode & M_IRWXU)	return S_IRUSR;
+	if(gmode & M_IRWXU)	return S_IWUSR;
+	if(gmode & M_IRWXU)	return S_IXUSR;
+	return -1;
+}
+
+int get_lseek_whence(int gflag) {
+	if(gflag & LSEEK_SET) return SEEK_SET;
+	if(gflag & LSEEK_CUR) return SEEK_CUR;
+	if(gflag & LSEEK_END) return SEEK_END;
+	return -1;
+}
 
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 	struct kvm_regs regs;
@@ -282,48 +323,64 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 
 					struct file_handler *fh_ptr = (struct file_handler *) ((char *)vm->mem + guest_mem_addr);
 					if(validate_guest_addr(vm->mem, fh_ptr, sizeof(struct file_handler)) == FALSE) {// should not be more than allocated memory for guest.
-						printf("Invalid File Handler Memory Location\n");
+						printf("Host: Invalid File Handler Memory Location\n");
 						continue;
 					}
 
 					if(fh_ptr->op == FS_OPEN) {
 						struct open_file *opn_ptr = (struct open_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);// fh_ptr->op_struct is logical address of guest means offset from vm->mem.
 						if(validate_guest_addr(vm->mem, opn_ptr, sizeof(struct open_file)) == FALSE) {
-							printf("Invalid Open Struct Memory Location\n");
+							printf("Host: Invalid Open Struct Memory Location\n");
 							continue;
 						}
 						char *pathname = (char *)vm->mem + (uintptr_t)opn_ptr->pathname;
 						if(validate_guest_addr(vm->mem, pathname, strlen(pathname)) == FALSE) {
-							printf("Invalid Pathname Memory Location\n");
+							printf("Host: Invalid Pathname Memory Location\n");
 							opn_ptr->fd = -1;
 							continue;
 						}
-						int fd;
-						if(opn_ptr->mode == -1) 
-							fd = open(pathname, opn_ptr->flags);
-						else fd = open(pathname, opn_ptr->flags, opn_ptr->mode);
+						int fd, flags, mode;
+						flags = get_open_flags(opn_ptr->flags);
+						mode = get_open_mode(opn_ptr->mode);
+						if(flags != -1 && opn_ptr->mode == -1) 
+							fd = open(pathname, flags);
+						else if(flags != -1 && mode != -1){
+							fd = open(pathname, flags, mode);
+						} else {
+							opn_ptr->fd = -1;
+							printf("Host: INVALID flags or mode\n");
+							continue;
+						}
+						if(fd < 0) {
+							fprintf(stderr, "%s\n", strerror(errno));
+							opn_ptr->fd = -1;
+							printf("Host: Stderror\n");
+							continue;
+						}
 
 						struct open_file_entry *eptr = make_entry();
 						eptr->fd = fd;
 						strcpy(eptr->pathname, pathname);
 						opn_ptr->fd = eptr->guest_fd;
+						printf("\nHost: opening file with pathname:%s", eptr->pathname);
+						print_file_table();
 						continue;
 					}
 					if(fh_ptr->op == FS_READ) {
 						struct read_file *rd_ptr = (struct read_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);
 						if(validate_guest_addr(vm->mem, rd_ptr, sizeof(struct read_file)) == FALSE) {
-							printf("Invalid Read Struct Memory Location\n");
+							printf("Host: Invalid Read Struct Memory Location\n");
 							continue;
 						}
 						struct open_file_entry *eptr = get_entry(rd_ptr->fd);
 						if(eptr == NULL) {
-							printf("File is not open\n");
+							printf("Host: File is not open\n");
 							rd_ptr->ssize = -1;
 							continue;
 						}
 						char *buf = (char *)vm->mem + (uintptr_t)rd_ptr->buf;
 						if(validate_guest_addr(vm->mem, buf, rd_ptr->size) == FALSE) { // entire buffer should be in guest memory no overflow.
-							printf("Invalid Read Buffer Memory Location\n");
+							printf("Host: Invalid Read Buffer Memory Location\n");
 							rd_ptr->ssize = -1;
 							continue;
 						}
@@ -334,18 +391,18 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 					if(fh_ptr->op == FS_WRITE) {
 						struct write_file *wr_ptr = (struct write_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);
 						if(validate_guest_addr(vm->mem, wr_ptr, sizeof(struct write_file)) == FALSE) {
-							printf("Invalid Write Struct Memory Location\n");
+							printf("Host: Invalid Write Struct Memory Location\n");
 							continue;
 						}
 						struct open_file_entry *eptr = get_entry(wr_ptr->fd);
 						if(eptr == NULL) {
-							printf("File is not open\n");
+							printf("Host: File is not open\n");
 							wr_ptr->ssize = -1;
 							continue;
 						}
 						char *buf = (char *)vm->mem + (uintptr_t)wr_ptr->buf;
 						if(validate_guest_addr(vm->mem, buf, wr_ptr->count) == FALSE) { // entire buffer should be in guest memory no overflow.
-							printf("Invalid Write Buffer Memory Location\n");
+							printf("Host: Invalid Write Buffer Memory Location\n");
 							wr_ptr->ssize = -1;
 							continue;
 						}
@@ -355,34 +412,38 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 						// printf("%s\n", buff);
 						if(strlen(buf) < wr_ptr->count) wr_ptr->count = strlen(buf);
 						wr_ptr->ssize = write(eptr->fd, buf, wr_ptr->count); // if binary data is written in sublime try opening in default text editor.
-						printf("write ssize:%d\n", wr_ptr->ssize);
+						printf("Host: write ssize:%d\n", wr_ptr->ssize);
 						continue;
 					}
 					if(fh_ptr->op == FS_CLOSE) {
 						struct open_file_entry *eptr = get_entry(fh_ptr->fd);
 						if(eptr == NULL) {
-							printf("File is not open\n");
+							printf("Host: File is not open\n");
 							fh_ptr->flag = -1;
 							continue;
 						}
 						fh_ptr->flag = close(eptr->fd);
 						if(fh_ptr->flag == 0) eptr->fd = -1;
+
+						printf("\nHost: closing file with pathname:%s", eptr->pathname);
+						print_file_table();
 						continue;
 					}
 					if(fh_ptr->op == FS_LSEEK) {
 						struct lseek_file *lsk_ptr = (struct lseek_file *) ((char *)vm->mem + (uintptr_t)fh_ptr->op_struct);
 						if(validate_guest_addr(vm->mem, lsk_ptr, sizeof(struct lseek_file)) == FALSE) {
-							printf("Invalid Lseek Struct Memory Location\n");
+							printf("Host: Invalid Lseek Struct Memory Location\n");
 							continue;
 						}
 						struct open_file_entry *eptr = get_entry(lsk_ptr->fd);
 						if(eptr == NULL) {
-							printf("File is not open\n");
+							printf("Host: File is not open\n");
 							lsk_ptr->foffset = -1;
 							continue;
 						}
-						lsk_ptr->foffset = lseek(eptr->fd, lsk_ptr->offset, lsk_ptr->whence);
-						printf("lseek foffset:%d\n", lsk_ptr->foffset);
+						int whence = get_lseek_whence(lsk_ptr->whence);
+						lsk_ptr->foffset = lseek(eptr->fd, lsk_ptr->offset, whence);
+						printf("Host: lseek foffset:%d\n", lsk_ptr->foffset);
 						continue;
 					}
 					if(fh_ptr->op == FS_ISOPEN) {
@@ -391,7 +452,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 						continue;
 					}
 
-					printf("INVALID FILE OPERATION\n");
+					printf("Host: INVALID FILE OPERATION\n");
 				}
 			}
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
@@ -403,7 +464,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz) {
 					continue;
 				}
 			}
-			printf("INVALID IO OPERATION\n");
+			printf("Host: INVALID IO OPERATION\n");
 			/* fall through */
 		default:
 			fprintf(stderr,	"Got exit_reason %d,"
