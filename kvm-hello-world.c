@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <linux/kvm.h>
-#include "kvm-guest-common.h"
+#include "kvm-header.h"
 
 /* CR0 bits */
 #define CR0_PE 1u
@@ -168,6 +168,9 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	// comment this
 	printf("VCPU size allocated: %d KB, at virtual address of hypervisor(host): %p\n", vcpu_mmap_size/1024, vcpu->kvm_run);
 }
+
+
+
 
 /////////////////////////////////////////////  My CODE ////////////////////////////////////////////////////////////////////////////////////////
 extern int errno;

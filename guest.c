@@ -1,6 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
-#include "kvm-guest-common.h"
+#include "guest-header.h"
 
 
 static void outb(uint16_t port, uint8_t value) {
@@ -140,7 +140,6 @@ int is_open(int fd) {
 	return fh.flag;
 }
 
-void list_open_files();
 int rename();
 int copy();
 int remove();
