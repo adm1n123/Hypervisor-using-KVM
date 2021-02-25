@@ -674,23 +674,25 @@ static void setup_64bit_code_segment(struct kvm_sregs *sregs)
 }
 
 static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
-{
+{	
 	// allocating virtual addresses to page tables of each level NOTE: virtual address of page table is fixed when process is loaded. physical address is changing because of swapping.
-	// setting the base address for 4rth level page table. but we are using only 3 level but usually we use 4 levels see below PDE64_PS.
-	uint64_t pml4_addr = 0x2000;	// offset from guest memory starting address. 0x2000 in hexadecimal = 0010,0000,0000,0000 = 2^13.
-	uint64_t *pml4 = (void *)(vm->mem + pml4_addr);
+	// setting the base address for 4rth level page table. but we are using only 3 level but usually we use 4 levels.
+	uint64_t pml4_addr = 0x2000;	//base address of pml4 table. offset from guest memory starting address. 0x2000 in hexadecimal = 0010,0000,0000,0000 = 2^13.
+	uint64_t *pml4 = (void *)(vm->mem + pml4_addr); // absolute pointer to pml4 table.
 
-	uint64_t pdpt_addr = 0x3000;
-	uint64_t *pdpt = (void *)(vm->mem + pdpt_addr);
+	uint64_t pdpt_addr = 0x3000; // base address of pdpt_addr table
+	uint64_t *pdpt = (void *)(vm->mem + pdpt_addr);// absolute pointer to pdpt table.
 
-	uint64_t pd_addr = 0x4000;
-	uint64_t *pd = (void *)(vm->mem + pd_addr);
+	uint64_t pd_addr = 0x4000; // base address of pd_addr table.
+	uint64_t *pd = (void *)(vm->mem + pd_addr); // absolute pointer to pd_addr table.
 
-	pml4[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_addr;
-	pdpt[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pd_addr;
-	pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | PDE64_PS;	// PDE64_PS means 2M paging is used not 4k paging hence only 3 level page tables 
+	// we know that there is only one page in process hence all the level of page tables will have single PTE so only 1st PTE is set for each level.
+	pml4[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_addr; //pml4[0] is the first PTE of pml4 table it has some flag bits and pdpt_addr(guest memory address of pdpt_addr table).
+	pdpt[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pd_addr;   // pdpt[0] is the 1st PTE of pdpt table pd_addr is stored in PTE which is address of next page table. 
+	pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | PDE64_PS;	// pd[0] is 1st PTE of pd table since guest memory is initialized with all zeros so no need to set the address of 1st(and only) page of process because guest physical address begin with all zeros.
+	//PDE64_PS is page size bit which indicates page pointed by this PTE is 2M not 4k. 
 
-	sregs->cr3 = pml4_addr;	// CR3 register is used to store the base address of highest level page table and we need to set it. because we can allocate pml4t anywhere.
+	sregs->cr3 = pml4_addr;	// CR3 register is used to store the base address of highest level page table and we need to set it. because we can allocate pml4 table anywhere in guest memory.
 	sregs->cr4 = CR4_PAE;	// CR4_PAE is 5th bit(1<<5). by setting it page size is treated as 2MB instead of 4KB(default). it is Physical Address Extension means it change page table layout to translate 32 bit virtual address to 36 bit physical address.
 	sregs->cr0
 		= CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
